@@ -1,78 +1,277 @@
-<!DOCTYPE html>
-<html lang="tr">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TOGG Şarj Hesaplama</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 20px;
-            margin: 0;
-            background-color: #f9f9f9;
-        }
-        h1 {
-            font-size: 24px;
-            margin-bottom: 20px;
-        }
-        input {
-            width: 80%;
-            padding: 10px;
-            margin: 10px 0;
-            font-size: 16px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-        }
-        button {
-            padding: 12px 20px;
-            font-size: 16px;
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            width: 80%;
-        }
-        button:hover {
-            background-color: #45a049;
-        }
-        #result {
-            margin-top: 20px;
-            font-size: 18px;
-            font-weight: bold;
-            color: #333;
-        }
-    </style>
-</head>
-<body>
-    <h1>TOGG Şarj Hesaplama Aracı</h1>
-    <p>Batarya Kapasitesi (kWh):</p>
-    <input type="number" id="capacity" value="88.5" step="0.1" placeholder="88.5">
-    <p>Başlangıç Yüzdesi (%):</p>
-    <input type="number" id="start" value="10" step="1" placeholder="10">
-    <p>Eklenen Enerji (kWh):</p>
-    <input type="number" id="addedEnergy" step="0.1" placeholder="Şarj edilen enerji (örn. 57.2)">
-    <button onclick="calculate()">Hesapla</button>
-    <h3>Sonuç:</h3>
-    <p id="result"></p>
+import React, { useState, useEffect } from 'react';
+import { Battery, Zap, Clock, AlertCircle } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
-    <script>
-        function calculate() {
-            const capacity = parseFloat(document.getElementById('capacity').value);
-            const start = parseFloat(document.getElementById('start').value);
-            const addedEnergy = parseFloat(document.getElementById('addedEnergy').value);
+const TOGGCalculator = () => {
+  const [inputs, setInputs] = useState({
+    capacity: 88.5,
+    start: 10,
+    addedEnergy: '',
+    chargingPower: 180, // Default DC charging power (kW)
+  });
 
-            if (isNaN(capacity) || isNaN(start) || isNaN(addedEnergy)) {
-                document.getElementById('result').textContent = "Lütfen tüm alanları doğru şekilde doldurun!";
-                return;
-            }
+  const [results, setResults] = useState({
+    newPercentage: null,
+    timeToCharge: null,
+    chargingHistory: [],
+    error: null,
+  });
 
-            const addedPercentage = (addedEnergy / capacity) * 100;
-            const newPercentage = start + addedPercentage;
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
-            document.getElementById('result').textContent = `Yeni doluluk oranı: ${newPercentage.toFixed(2)}%`;
-        }
-    </script>
-</body>
-</html>
+  const calculateCharging = () => {
+    try {
+      const { capacity, start, addedEnergy, chargingPower } = inputs;
+
+      // Validations
+      if (start < 0 || start > 100) {
+        throw new Error('Başlangıç yüzdesi 0-100 arasında olmalıdır');
+      }
+      if (addedEnergy < 0) {
+        throw new Error('Eklenen enerji negatif olamaz');
+      }
+      if (addedEnergy > capacity) {
+        throw new Error('Eklenen enerji batarya kapasitesinden büyük olamaz');
+      }
+
+      const addedPercentage = (addedEnergy / capacity) * 100;
+      const newPercentage = start + addedPercentage;
+      
+      if (newPercentage > 100) {
+        throw new Error('Toplam şarj %100\'ü geçemez');
+      }
+
+      // Calculate charging time (hours)
+      const timeToCharge = addedEnergy / chargingPower;
+
+      // Generate charging history data points
+      const historyPoints = [];
+      const steps = 10;
+      for (let i = 0; i <= steps; i++) {
+        const time = (timeToCharge * i) / steps;
+        const percentage = start + (addedPercentage * i) / steps;
+        historyPoints.push({
+          time: Number(time.toFixed(2)),
+          percentage: Number(percentage.toFixed(2)),
+        });
+      }
+
+      setResults({
+        newPercentage,
+        timeToCharge,
+        chargingHistory: historyPoints,
+        error: null,
+      });
+    } catch (error) {
+      setResults({
+        ...results,
+        error: error.message,
+      });
+    }
+  };
+
+  const formatTime = (hours) => {
+    const h = Math.floor(hours);
+    const m = Math.round((hours - h) * 60);
+    return `${h} saat ${m} dakika`;
+  };
+
+  const getBatteryColor = (percentage) => {
+    if (percentage <= 20) return 'text-red-500';
+    if (percentage <= 50) return 'text-yellow-500';
+    return 'text-green-500';
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto p-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Battery className="h-6 w-6" />
+            TOGG Şarj Hesaplama
+          </CardTitle>
+          <CardDescription>
+            TOGG elektrikli aracınızın şarj durumunu hesaplayın
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-4">
+            {/* Main Inputs */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Batarya Kapasitesi (kWh)
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    value={inputs.capacity}
+                    onChange={(e) => setInputs({ ...inputs, capacity: parseFloat(e.target.value) || 0 })}
+                    className="w-full p-2 border rounded"
+                  />
+                  <div className="absolute right-0 top-0 h-full flex flex-col border-l">
+                    <button 
+                      className="flex-1 px-2 hover:bg-gray-100 border-b flex items-center justify-center"
+                      onClick={() => setInputs(prev => ({ ...prev, capacity: (prev.capacity || 0) + 1 }))}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 15l-6-6-6 6"/>
+                      </svg>
+                    </button>
+                    <button 
+                      className="flex-1 px-2 hover:bg-gray-100 flex items-center justify-center"
+                      onClick={() => setInputs(prev => ({ ...prev, capacity: (prev.capacity || 0) - 1 }))}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 9l6 6 6-6"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Başlangıç Yüzdesi (%)
+                </label>
+                <input
+                  type="number"
+                  value={inputs.start}
+                  onChange={(e) => setInputs({ ...inputs, start: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Eklenen Enerji (kWh)
+                </label>
+                <input
+                  type="number"
+                  value={inputs.addedEnergy}
+                  onChange={(e) => setInputs({ ...inputs, addedEnergy: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-medium">
+                  Şarj Gücü (kW)
+                </label>
+                <input
+                  type="number"
+                  value={inputs.chargingPower}
+                  onChange={(e) => setInputs({ ...inputs, chargingPower: parseFloat(e.target.value) || 0 })}
+                  className="w-full p-2 border rounded"
+                />
+              </div>
+            </div>
+
+            {/* Calculate Button */}
+            <button
+              onClick={calculateCharging}
+              className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600 transition-colors"
+            >
+              Hesapla
+            </button>
+
+            {/* Results */}
+            {results.error ? (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{results.error}</AlertDescription>
+              </Alert>
+            ) : results.newPercentage !== null && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-2">
+                        <Battery className={getBatteryColor(results.newPercentage)} />
+                        <div>
+                          <p className="text-sm text-gray-500">Yeni Şarj Durumu</p>
+                          <p className="text-2xl font-bold">
+                            {results.newPercentage.toFixed(1)}%
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-2">
+                        <Clock />
+                        <div>
+                          <p className="text-sm text-gray-500">Şarj Süresi</p>
+                          <p className="text-2xl font-bold">
+                            {formatTime(results.timeToCharge)}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-2">
+                        <Zap />
+                        <div>
+                          <p className="text-sm text-gray-500">Ortalama Güç</p>
+                          <p className="text-2xl font-bold">
+                            {inputs.chargingPower} kW
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Charging Graph */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Şarj Grafiği</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={results.chargingHistory}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis 
+                            dataKey="time" 
+                            label={{ value: 'Saat', position: 'bottom' }} 
+                          />
+                          <YAxis 
+                            label={{ value: 'Şarj (%)', angle: -90, position: 'insideLeft' }}
+                            domain={[0, 100]} 
+                          />
+                          <Tooltip 
+                            formatter={(value) => [`${value}%`, 'Şarj']}
+                            labelFormatter={(value) => `${value} saat`}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="percentage" 
+                            stroke="#2563eb" 
+                            strokeWidth={2}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+export default TOGGCalculator;
